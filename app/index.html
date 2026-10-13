@@ -1,0 +1,174 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Drug Classification | ML Dashboard</title>
+  <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.min.js"></script>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; font-family: Arial, sans-serif; color: #172033;
+      background: #f3f6fb;
+    }
+    header {
+      background: #14284b; color: white; padding: 25px max(6%, 20px);
+    }
+    header h1 { margin: 0 0 8px; font-size: 26px; }
+    header p { margin: 0; color: #d5e2f8; }
+    main { max-width: 950px; margin: 28px auto; padding: 0 16px; }
+    .card {
+      background: white; padding: 25px; border-radius: 14px;
+      box-shadow: 0 5px 22px #16284912; margin-bottom: 20px;
+    }
+    h2 { margin-top: 0; font-size: 20px; }
+    .grid {
+      display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 18px;
+    }
+    label { display: block; font-weight: 600; font-size: 14px; }
+    input, select {
+      width: 100%; margin-top: 8px; padding: 12px;
+      border: 1px solid #ccd5e2; border-radius: 8px;
+      background: white; font-size: 15px;
+    }
+    button {
+      margin-top: 22px; padding: 13px 20px; border: 0;
+      border-radius: 8px; background: #2463eb; color: white;
+      font-size: 15px; font-weight: 700; cursor: pointer;
+    }
+    button:disabled { opacity: .6; cursor: wait; }
+    #result {
+      display: none; margin-top: 20px; padding: 18px;
+      border-radius: 10px; background: #eaf8ef; border: 1px solid #b6e5c5;
+    }
+    #drug { font-size: 26px; font-weight: 700; color: #12663a; }
+    #status { color: #536177; margin-top: 12px; }
+    .note { color: #68758a; font-size: 13px; line-height: 1.6; }
+    footer { text-align: center; padding: 20px; color: #68758a; font-size: 13px; }
+    @media (max-width: 600px) {
+      .grid { grid-template-columns: 1fr; }
+      .card { padding: 18px; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Drug Classification Dashboard</h1>
+    <p>Machine Learning · Random Forest · ONNX browser inference</p>
+  </header>
+
+  <main>
+    <section class="card">
+      <h2>Patient information</h2>
+      <form id="prediction-form">
+        <div class="grid">
+          <label>Age
+            <input id="age" type="number" min="1" max="120" value="35" required>
+          </label>
+          <label>Sex
+            <select id="sex"><option value="F">Female</option><option value="M">Male</option></select>
+          </label>
+          <label>Blood pressure
+            <select id="bp">
+              <option value="LOW">Low</option>
+              <option value="NORMAL" selected>Normal</option>
+              <option value="HIGH">High</option>
+            </select>
+          </label>
+          <label>Cholesterol
+            <select id="cholesterol">
+              <option value="NORMAL">Normal</option>
+              <option value="HIGH" selected>High</option>
+            </select>
+          </label>
+          <label>Na-to-K ratio
+            <input id="ratio" type="number" min="0.1" max="100" step="0.01" value="15.5" required>
+          </label>
+        </div>
+        <button id="predict" type="submit">Predict drug category</button>
+      </form>
+      <p id="status">Loading the trained ONNX model…</p>
+      <div id="result" aria-live="polite">
+        <div>Predicted drug category</div>
+        <div id="drug"></div>
+        <p class="note">This is a machine-learning project demonstration, not medical advice. Do not use its prediction to select or change medication.</p>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>About this project</h2>
+      <p>This application uses a Random Forest classifier trained on the Drug200 dataset. The model is exported to ONNX and loaded in the browser using ONNX Runtime Web.</p>
+      <p class="note">Predictions depend on the training dataset and model quality. They are not a substitute for a qualified healthcare professional.</p>
+    </section>
+  </main>
+  <footer>Drug Classification ML Project · Browser-based inference</footer>
+
+  <script>
+    let session;
+
+    async function loadModel() {
+      const status = document.getElementById("status");
+      try {
+        session = await ort.InferenceSession.create("./drug_model.onnx");
+        status.textContent = "Model loaded successfully. Enter values to predict.";
+      } catch (error) {
+        status.textContent =
+          "Could not load the ONNX model. Ensure drug_model.onnx is uploaded beside index.html. " +
+          error.message;
+      }
+    }
+
+    document.getElementById("prediction-form").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const button = document.getElementById("predict");
+      const status = document.getElementById("status");
+      const result = document.getElementById("result");
+
+      if (!session) {
+        status.textContent = "The model is not loaded yet. Please wait or refresh the page.";
+        return;
+      }
+
+      button.disabled = true;
+      result.style.display = "none";
+
+      try {
+        const values = {
+          Age: Number(document.getElementById("age").value),
+          Sex: document.getElementById("sex").value,
+          BP: document.getElementById("bp").value,
+          Cholesterol: document.getElementById("cholesterol").value,
+          Na_to_K: Number(document.getElementById("ratio").value)
+        };
+
+        const feeds = {};
+        for (const name of session.inputNames) {
+          if (!(name in values)) throw new Error("Unexpected model input: " + name);
+          const value = values[name];
+          const isText = typeof value === "string";
+          feeds[name] = new ort.Tensor(
+            isText ? "string" : "float32",
+            isText ? [value] : [value],
+            [1, 1]
+          );
+        }
+
+        const output = await session.run(feeds);
+        const firstOutput = output[session.outputNames[0]];
+        const prediction = firstOutput.data[0];
+
+        document.getElementById("drug").textContent = String(prediction);
+        result.style.display = "block";
+        status.textContent = "Prediction completed successfully.";
+      } catch (error) {
+        status.textContent = "Prediction failed: " + error.message;
+      } finally {
+        button.disabled = false;
+      }
+    });
+
+    loadModel();
+  </script>
+</body>
+</html>
